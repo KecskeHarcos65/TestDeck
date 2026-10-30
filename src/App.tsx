@@ -469,7 +469,7 @@ function DashboardView({ drives, models, lifecycle, onOpenDrive }: { drives: Dri
           <tbody>
             {mfrSummary.map(m => (
               <tr key={m.manufacturer}>
-                <td>{m.manufacturer}</td>
+                <td>{String(m.manufacturer || '')}</td>
                 <td>{m.tests}</td>
                 <td>{m.failPct}%</td>
                 <td>{m.avgSeqW} MB/s</td>
@@ -488,8 +488,8 @@ function DashboardView({ drives, models, lifecycle, onOpenDrive }: { drives: Dri
             {drives.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 10).map(d => (
               <tr key={d.id} className="cursor-pointer" onClick={() => onOpenDrive(d)}>
                 <td>{formatDate(d.createdAt)}</td>
-                <td>{d.model?.substring(0, 25)}</td>
-                <td>{d.serial?.substring(0, 12)}</td>
+                <td>{String(d.model || '').substring(0, 25)}</td>
+                <td>{String(d.serial || '').substring(0, 12)}</td>
                 <td>{d.seqRead}/{d.seqWrite} MB/s</td>
                 <td>{d.wear}%</td>
                 <td><span className={`badge ${d.verdict === 'PASS' ? 'badge-pass' : d.verdict === 'FAIL' ? 'badge-fail' : 'badge-watch'}`}>{d.verdict}</span></td>
@@ -874,7 +874,7 @@ function DrivesView({ drives, lifecycle, user, token, onOpenDrive, onRefresh }: 
 
   const exportCSV = () => {
     const headers = ['Date','Model','Serial','Capacity','Bus','Media','Health','Wear','SeqR','SeqW','RndR','RndW','Verdict','Batch','Owner'];
-    const rows = filtered.map(d => [formatDate(d.createdAt), d.model, d.serial, d.capacityGB, d.bus, d.media, d.healthStatus, d.wear, d.seqRead, d.seqWrite, d.rndRead, d.rndWrite, d.verdict, d.batch, d.owner]);
+    const rows = filtered.map(d => [formatDate(d.createdAt), String(d.model || ''), String(d.serial || ''), d.capacityGB, String(d.bus || ''), String(d.media || ''), String(d.healthStatus || ''), d.wear, d.seqRead, d.seqWrite, d.rndRead, d.rndWrite, d.verdict, String(d.batch || ''), d.owner]);
     const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -925,8 +925,8 @@ function DrivesView({ drives, lifecycle, user, token, onOpenDrive, onRefresh }: 
             {filtered.map(d => (
               <tr key={d.id} className="cursor-pointer" onClick={() => onOpenDrive(d)}>
                 <td>{formatDate(d.createdAt)}</td>
-                <td>{d.model?.substring(0, 25)}</td>
-                <td>{d.serial?.substring(0, 14)}</td>
+                <td>{String(d.model || '').substring(0, 25)}</td>
+                <td>{String(d.serial || '').substring(0, 14)}</td>
                 <td>{d.capacityGB}G</td>
                 <td><span className="text-xs">{getLifecycleStatus(d.serial)}</span></td>
                 <td>{d.seqWrite} MB/s</td>
@@ -995,7 +995,7 @@ function DriveDrawer({ drive, drives, lifecycle, models, labels, token, onClose,
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div className="p-3 rounded" style={{background:'var(--bg-card)'}}>
             <div className="text-xs text-[var(--text-secondary)]">Health</div>
-            <div className="font-mono font-bold" style={{color: drive.healthStatus === 'Healthy' ? 'var(--green)' : 'var(--red)'}}>{drive.healthStatus}</div>
+            <div className="font-mono font-bold" style={{color: String(drive.healthStatus) === 'Healthy' ? 'var(--green)' : 'var(--red)'}}>{String(drive.healthStatus || 'Unknown')}</div>
           </div>
           <div className="p-3 rounded" style={{background:'var(--bg-card)'}}>
             <div className="text-xs text-[var(--text-secondary)]">Wear</div>
@@ -1021,14 +1021,14 @@ function DriveDrawer({ drive, drives, lifecycle, models, labels, token, onClose,
         <div className="mb-4 text-sm">
           <h4 className="font-bold mb-2" style={{color:'var(--cyan)'}}>IDENTITY</h4>
           <div className="grid grid-cols-2 gap-1 font-mono text-xs">
-            <span className="text-[var(--text-secondary)]">Model:</span><span>{drive.model}</span>
-            <span className="text-[var(--text-secondary)]">Serial:</span><span>{drive.serial}</span>
-            <span className="text-[var(--text-secondary)]">FW:</span><span>{drive.firmware}</span>
+            <span className="text-[var(--text-secondary)]">Model:</span><span>{String(drive.model || '')}</span>
+            <span className="text-[var(--text-secondary)]">Serial:</span><span>{String(drive.serial || '')}</span>
+            <span className="text-[var(--text-secondary)]">FW:</span><span>{String(drive.firmware || '')}</span>
             <span className="text-[var(--text-secondary)]">Capacity:</span><span>{drive.capacityGB} GB</span>
-            <span className="text-[var(--text-secondary)]">Bus:</span><span>{drive.bus}</span>
-            <span className="text-[var(--text-secondary)]">Media:</span><span>{drive.media}</span>
+            <span className="text-[var(--text-secondary)]">Bus:</span><span>{String(drive.bus || '')}</span>
+            <span className="text-[var(--text-secondary)]">Media:</span><span>{String(drive.media || '')}</span>
             <span className="text-[var(--text-secondary)]">Family:</span><span>{familyModel?.family || '-'}</span>
-            <span className="text-[var(--text-secondary)]">Batch:</span><span>{drive.batch || '-'}</span>
+            <span className="text-[var(--text-secondary)]">Batch:</span><span>{String(drive.batch || '-')}</span>
           </div>
         </div>
 
