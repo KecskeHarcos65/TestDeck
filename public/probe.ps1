@@ -153,15 +153,15 @@ function Get-DriveInventory {
         Write-Host "[INVENTORY] Processing disk #$($disk.Number): $($disk.FriendlyName)" -ForegroundColor Cyan
         $diskNum = $disk.Number
         $info = @{
-            diskNumber = $diskNum
-            model = $disk.FriendlyName
+            diskNumber = [int]$diskNum
+            model = [string]$disk.FriendlyName
             serial = ""
             firmware = ""
-            capacityGB = [math]::Round($disk.Size / 1GB, 2)
+            capacityGB = [double]([math]::Round($disk.Size / 1GB, 2))
             bus = "Unknown"
             media = "Unknown"
-            healthStatus = "Unknown"
-            operationalStatus = "Unknown"
+            healthStatus = [string]$disk.HealthStatus
+            operationalStatus = [string]$disk.OperationalStatus
             letters = New-Object System.Collections.ArrayList
             wear = $null
             tempC = $null
@@ -204,11 +204,11 @@ function Get-DriveInventory {
         try {
             $cimDisk = Get-CimInstance -ClassName Win32_DiskDrive -Filter "Index=$diskNum" -ErrorAction Stop
             if ($null -ne $cimDisk) {
-                $info.serial = $cimDisk.SerialNumber
-                $info.firmware = $cimDisk.FirmwareRevision
+                $info.serial = [string]$cimDisk.SerialNumber
+                $info.firmware = [string]$cimDisk.FirmwareRevision
                 $info.fwSrc = "CIM"
                 if ([string]::IsNullOrWhiteSpace($info.model) -or $info.model -eq "Disk drive") {
-                    $info.model = $cimDisk.Model
+                    $info.model = [string]$cimDisk.Model
                 }
             }
         } catch {
@@ -216,8 +216,8 @@ function Get-DriveInventory {
             try {
                 $physMedia = Get-PhysicalDisk -ErrorAction Stop | Where-Object { $_.DeviceId -eq $diskNum }
                 if ($null -ne $physMedia) {
-                    $info.serial = $physMedia.SerialNumber
-                    if ([string]::IsNullOrWhiteSpace($info.model)) { $info.model = $physMedia.FriendlyName }
+                    $info.serial = [string]$physMedia.SerialNumber
+                    if ([string]::IsNullOrWhiteSpace($info.model)) { $info.model = [string]$physMedia.FriendlyName }
                 }
             } catch {}
         }
@@ -226,8 +226,9 @@ function Get-DriveInventory {
         try {
             $partitions = Get-Partition -DiskNumber $diskNum -ErrorAction Stop
             foreach ($part in $partitions) {
-                if (-not [string]::IsNullOrWhiteSpace($part.DriveLetter)) {
-                    [void]$info.letters.Add($part.DriveLetter)
+                $letter = [string]$part.DriveLetter
+                if (-not [string]::IsNullOrWhiteSpace($letter) -and $letter.Length -eq 1) {
+                    [void]$info.letters.Add($letter)
                 }
             }
             $info.letSrc = "Storage"
@@ -240,7 +241,10 @@ function Get-DriveInventory {
                         Where-Object { $_.DeviceID -match ($part.DeviceID -replace '\\','') }
                     foreach ($ld in $logDisks) {
                         if ($ld.DeviceID.Length -ge 1) {
-                            [void]$info.letters.Add($ld.DeviceID[0])
+                            $letter = [string]$ld.DeviceID[0]
+                            if ($letter.Length -eq 1) {
+                                [void]$info.letters.Add($letter)
+                            }
                         }
                     }
                 }
@@ -254,10 +258,10 @@ function Get-DriveInventory {
         try {
             $relCounter = Get-StorageReliabilityCounter -Disk $disk -ErrorAction Stop
             if ($null -ne $relCounter) {
-                $info.wear = $relCounter.Wear
-                $info.tempC = $relCounter.Temperature
-                $info.readErrors = $relCounter.ReadErrorsTotal
-                $info.writeErrors = $relCounter.WriteErrorsTotal
+                $info.wear = if ($null -ne $relCounter.Wear) { [int]$relCounter.Wear } else { $null }
+                $info.tempC = if ($null -ne $relCounter.Temperature) { [int]$relCounter.Temperature } else { $null }
+                $info.readErrors = if ($null -ne $relCounter.ReadErrorsTotal) { [long]$relCounter.ReadErrorsTotal } else { $null }
+                $info.writeErrors = if ($null -ne $relCounter.WriteErrorsTotal) { [long]$relCounter.WriteErrorsTotal } else { $null }
                 $info.relOk = $true
             }
         } catch {
@@ -937,8 +941,24 @@ function ConvertTo-SafeJson($obj) {
         return $obj.ToString().ToLower()
     }
     
-    if ($obj -is [int] -or $obj -is [long] -or $obj -is [double] -or $obj -is [float] -or $obj -is [decimal]) {
-        return $obj.ToString()
+    # Handle numeric types with invariant culture (use dot, not comma)
+    if ($obj -is [int] -or $obj -is [long]) {
+        return $obj.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    
+    if ($obj -is [double] -or $obj -is [float] -or $obj -is [decimal]) {
+        return $obj.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    
+    # Handle enum types (convert to string)
+    if ($obj -is [enum]) {
+        return Escape-JsonString $obj.ToString()
+    }
+    
+    # Handle objects with Length property (PSObject wrappers)
+    if ($obj.PSObject.Properties.Name -contains 'Length' -and $obj.PSObject.Properties.Name -notcontains 'Keys') {
+        # This is likely an enum or PSObject wrapper, convert to string
+        return Escape-JsonString $obj.ToString()
     }
     
     # Fallback: convert to string
