@@ -310,7 +310,11 @@ function Get-DriveInventory {
 function Run-RndBench($driveLetter, $op, $seconds, $sizeMB) {
     Write-Host "[RND] Starting RND benchmark on drive $driveLetter, op=$op, seconds=$seconds, size=$sizeMB MB" -ForegroundColor Cyan
     $folder = Get-WritableFolder $driveLetter
-    if ($null -eq $folder) { return @{ error = "No writable folder on $driveLetter" } }
+    if ($null -eq $folder) { 
+        $errorObj = New-Object PSObject
+        $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "No writable folder on $driveLetter"
+        return ,$errorObj
+    }
     $filePath = Join-Path $folder "testdeck.rnd.tmp"
     $blockSize = 4096
     $totalBlocks = [math]::Max(256, $sizeMB * 256)
@@ -390,9 +394,16 @@ function Run-RndBench($driveLetter, $op, $seconds, $sizeMB) {
         }
 
         Remove-AlignedBuffer $buf
-        return $result
+        # Convert hashtable to PSCustomObject to prevent PowerShell 5.1 unwrapping
+        $resultObj = New-Object PSObject
+        foreach ($key in $result.Keys) {
+            $resultObj | Add-Member -MemberType NoteProperty -Name $key -Value $result[$key]
+        }
+        return ,$resultObj
     } catch {
-        return @{ error = "RndBench exception: $($_.Exception.Message)" }
+        $errorObj = New-Object PSObject
+        $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "RndBench exception: $($_.Exception.Message)"
+        return ,$errorObj
     }
 }
 
@@ -511,9 +522,16 @@ function Run-SeqBench($driveLetter, $op, $sizeMB) {
         }
 
         Remove-AlignedBuffer $buf
-        return $result
+        # Convert hashtable to PSCustomObject to prevent PowerShell 5.1 unwrapping
+        $resultObj = New-Object PSObject
+        foreach ($key in $result.Keys) {
+            $resultObj | Add-Member -MemberType NoteProperty -Name $key -Value $result[$key]
+        }
+        return ,$resultObj
     } catch {
-        return @{ error = "SeqBench exception: $($_.Exception.Message)" }
+        $errorObj = New-Object PSObject
+        $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "SeqBench exception: $($_.Exception.Message)"
+        return ,$errorObj
     }
 }
 
@@ -585,9 +603,16 @@ function Run-QdBench($driveLetter, $kind, $q, $seconds, $op) {
         $result.iops = [math]::Round($totalOps / $sw.Elapsed.TotalSeconds, 0)
         $result.mbps = [math]::Round($totalOps * $blockSize / 1MB / $sw.Elapsed.TotalSeconds, 2)
         Write-Host "[QD] Result: $($result.mbps) MB/s, $($result.iops) IOPS" -ForegroundColor Green
-        return $result
+        # Convert hashtable to PSCustomObject to prevent PowerShell 5.1 unwrapping
+        $resultObj = New-Object PSObject
+        foreach ($key in $result.Keys) {
+            $resultObj | Add-Member -MemberType NoteProperty -Name $key -Value $result[$key]
+        }
+        return ,$resultObj
     } catch {
-        return @{ error = "QdBench exception: $($_.Exception.Message)" }
+        $errorObj = New-Object PSObject
+        $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "QdBench exception: $($_.Exception.Message)"
+        return ,$errorObj
     }
 }
 
@@ -656,14 +681,22 @@ function Run-MixBench($driveLetter, $seconds, $sizeMB) {
         Remove-AlignedBuffer $buf
 
         $elapsed = $sw.Elapsed.TotalSeconds
-        return @{
+        $result = @{
             readMbps = [math]::Round($readOps * $blockSize / 1MB / $elapsed, 2)
             writeMbps = [math]::Round($writeOps * $blockSize / 1MB / $elapsed, 2)
             readIops = [math]::Round($readOps / $elapsed, 0)
             writeIops = [math]::Round($writeOps / $elapsed, 0)
         }
+        # Convert hashtable to PSCustomObject to prevent PowerShell 5.1 unwrapping
+        $resultObj = New-Object PSObject
+        foreach ($key in $result.Keys) {
+            $resultObj | Add-Member -MemberType NoteProperty -Name $key -Value $result[$key]
+        }
+        return ,$resultObj
     } catch {
-        return @{ error = "MixBench exception: $($_.Exception.Message)" }
+        $errorObj = New-Object PSObject
+        $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "MixBench exception: $($_.Exception.Message)"
+        return ,$errorObj
     }
 }
 
@@ -784,15 +817,23 @@ function Run-SustainedBench($driveLetter, $sizeMB, $percent) {
             [void]$downsampled.Add($series[$i])
         }
 
-        return @{
+        $result = @{
             cacheMB = $cacheMB
             sustainedMbps = [math]::Round($tailAvg, 1)
             maxTemp = $maxTemp
             sizeMB = $sizeMB
             series = $downsampled
         }
+        # Convert hashtable to PSCustomObject to prevent PowerShell 5.1 unwrapping
+        $resultObj = New-Object PSObject
+        foreach ($key in $result.Keys) {
+            $resultObj | Add-Member -MemberType NoteProperty -Name $key -Value $result[$key]
+        }
+        return ,$resultObj
     } catch {
-        return @{ error = "SustainedBench exception: $($_.Exception.Message)" }
+        $errorObj = New-Object PSObject
+        $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "SustainedBench exception: $($_.Exception.Message)"
+        return ,$errorObj
     }
 }
 
@@ -869,13 +910,21 @@ function Run-VerifyBench($driveLetter, $sizeMB) {
         Remove-AlignedBuffer $buf
         Remove-AlignedBuffer $readBuf
 
-        return @{
+        $result = @{
             testedMB = $testedMB
             badBlocks = $badBlocks
             firstBadMB = $firstBadMB
         }
+        # Convert hashtable to PSCustomObject to prevent PowerShell 5.1 unwrapping
+        $resultObj = New-Object PSObject
+        foreach ($key in $result.Keys) {
+            $resultObj | Add-Member -MemberType NoteProperty -Name $key -Value $result[$key]
+        }
+        return ,$resultObj
     } catch {
-        return @{ error = "VerifyBench exception: $($_.Exception.Message)" }
+        $errorObj = New-Object PSObject
+        $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "VerifyBench exception: $($_.Exception.Message)"
+        return ,$errorObj
     }
 }
 
@@ -894,7 +943,24 @@ function Run-Cleanup() {
             }
         }
     }
-    return @{ ok = $true }
+    $result = @{ ok = $true }
+    $resultObj = New-Object PSObject
+    foreach ($key in $result.Keys) {
+        $resultObj | Add-Member -MemberType NoteProperty -Name $key -Value $result[$key]
+    }
+    return ,$resultObj
+}
+
+# --- Helper function to convert hashtable to PSCustomObject ---
+function ConvertTo-PSCustomObject($hashtable) {
+    if ($null -eq $hashtable) { return $null }
+    if ($hashtable -isnot [hashtable]) { return $hashtable }
+    
+    $obj = New-Object PSObject
+    foreach ($key in $hashtable.Keys) {
+        $obj | Add-Member -MemberType NoteProperty -Name $key -Value $hashtable[$key]
+    }
+    return ,$obj
 }
 
 # --- JSON Helper ---
