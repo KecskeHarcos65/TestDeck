@@ -1122,6 +1122,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-SEQ] Running SEQ benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-SeqBench $data.drive $data.op $data.sizeMB
+        
+        # Handle PowerShell 5.1 array unwrapping
+        if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
+            Write-Host "[BENCH-SEQ] Detected array unwrapping, extracting object" -ForegroundColor Yellow
+            $result = $result[1]
+        }
+        
         Write-Host "[BENCH-SEQ] Result: readMbps=$($result.readMbps), writeMbps=$($result.writeMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1130,6 +1137,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-RND] Running RND benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-RndBench $data.drive $data.op $data.seconds $data.sizeMB
+        
+        # Handle PowerShell 5.1 array unwrapping
+        if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
+            Write-Host "[BENCH-RND] Detected array unwrapping, extracting object" -ForegroundColor Yellow
+            $result = $result[1]
+        }
+        
         Write-Host "[BENCH-RND] Result: readMbps=$($result.readMbps), writeMbps=$($result.writeMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1138,6 +1152,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-QD] Running QD benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-QdBench $data.drive $data.kind $data.q $data.seconds $data.op
+        
+        # Handle PowerShell 5.1 array unwrapping
+        if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
+            Write-Host "[BENCH-QD] Detected array unwrapping, extracting object" -ForegroundColor Yellow
+            $result = $result[1]
+        }
+        
         Write-Host "[BENCH-QD] Result: mbps=$($result.mbps), iops=$($result.iops)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1146,6 +1167,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-MIX] Running MIX benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-MixBench $data.drive $data.seconds $data.sizeMB
+        
+        # Handle PowerShell 5.1 array unwrapping
+        if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
+            Write-Host "[BENCH-MIX] Detected array unwrapping, extracting object" -ForegroundColor Yellow
+            $result = $result[1]
+        }
+        
         Write-Host "[BENCH-MIX] Result: readMbps=$($result.readMbps), writeMbps=$($result.writeMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1154,6 +1182,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-SUSTAINED] Running SUSTAINED benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-SustainedBench $data.drive $data.sizeMB $data.percent
+        
+        # Handle PowerShell 5.1 array unwrapping
+        if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
+            Write-Host "[BENCH-SUSTAINED] Detected array unwrapping, extracting object" -ForegroundColor Yellow
+            $result = $result[1]
+        }
+        
         Write-Host "[BENCH-SUSTAINED] Result: sustainedMbps=$($result.sustainedMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1162,6 +1197,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-VERIFY] Running VERIFY benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-VerifyBench $data.drive $data.sizeMB
+        
+        # Handle PowerShell 5.1 array unwrapping
+        if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
+            Write-Host "[BENCH-VERIFY] Detected array unwrapping, extracting object" -ForegroundColor Yellow
+            $result = $result[1]
+        }
+        
         Write-Host "[BENCH-VERIFY] Result: testedMB=$($result.testedMB), badBlocks=$($result.badBlocks)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1169,6 +1211,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
     if ($path -eq "/bench/cleanup" -and $method -eq "POST") {
         Write-Host "[BENCH-CLEANUP] Running cleanup" -ForegroundColor Cyan
         $result = Run-Cleanup
+        
+        # Handle PowerShell 5.1 array unwrapping
+        if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
+            Write-Host "[BENCH-CLEANUP] Detected array unwrapping, extracting object" -ForegroundColor Yellow
+            $result = $result[1]
+        }
+        
         Send-ProbeResponse $stream 200 "OK" $result
         return
     }
