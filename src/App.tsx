@@ -885,7 +885,7 @@ function DrivesView({ drives, lifecycle, user, token, onOpenDrive, onRefresh }: 
 
   const getLifecycleStatus = (serial: string) => {
     const lc = lifecycle.find(l => l.serial === serial);
-    return lc?.status || '-';
+    return String(lc?.status || '-');
   };
 
   return (
@@ -954,7 +954,7 @@ function DriveDrawer({ drive, drives, lifecycle, models, labels, token, onClose,
 
   useEffect(() => {
     const lc = lifecycle.find(l => l.serial === drive.serial);
-    if (lc) setLcStatus(lc.status);
+    if (lc) setLcStatus(String(lc.status || ''));
   }, [drive, lifecycle]);
 
   const history = drives.filter(d => d.serial === drive.serial).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
