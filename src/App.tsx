@@ -36,6 +36,9 @@ interface ProbeDrive {
   readErrors: number; writeErrors: number; relOk: boolean; relErr: string;
   letSrc: string; fwSrc: string;
 }
+interface Settings {
+  testFileSizeMB: number;
+}
 
 // ==================== API ====================
 const API_BASE = window.location.origin && window.location.origin !== 'null' 
@@ -177,6 +180,15 @@ export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [selectedDrive, setSelectedDrive] = useState<DriveRecord | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [settings, setSettings] = useState<Settings>(() => {
+    const saved = localStorage.getItem('td_settings');
+    return saved ? JSON.parse(saved) : { testFileSizeMB: 64 };
+  });
+
+  // Save settings to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('td_settings', JSON.stringify(settings));
+  }, [settings]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -308,7 +320,7 @@ export default function App() {
           <nav className="flex gap-1">
             {[
               ['dashboard','Dashboard'],['newtest','New Test'],['drives','My Drives'],
-              ...(user.role === 'admin' ? [['admin','Admin']] : []),
+              ...(user.role === 'admin' ? [['admin','Admin'],['settings','Settings']] : []),
               ['help','Help']
             ].map(([k,l]) => (
               <button key={k} onClick={() => { setView(k as string); if (k === 'admin') loadUsers(); }}
@@ -344,9 +356,10 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 p-4 overflow-auto">
         {view === 'dashboard' && <DashboardView drives={drives} models={models} lifecycle={lifecycle} onOpenDrive={setSelectedDrive} />}
-        {view === 'newtest' && <NewTestView profiles={profiles} models={models} token={token} probeOnline={probeOnline} onSaved={() => { loadData(); showToast('Record saved'); }} />}
+        {view === 'newtest' && <NewTestView profiles={profiles} models={models} token={token} probeOnline={probeOnline} settings={settings} onSaved={() => { loadData(); showToast('Record saved'); }} />}
         {view === 'drives' && <DrivesView drives={drives} lifecycle={lifecycle} user={user} token={token} onOpenDrive={setSelectedDrive} onRefresh={loadData} />}
         {view === 'admin' && user.role === 'admin' && <AdminView profiles={profiles} labels={labels} models={models} users={users} token={token} onRefresh={() => { loadData(); loadUsers(); }} showToast={showToast} />}
+        {view === 'settings' && user.role === 'admin' && <SettingsView settings={settings} setSettings={setSettings} showToast={showToast} />}
         {view === 'help' && <HelpView />}
       </main>
 
@@ -519,8 +532,55 @@ function StatTile({ label, value, color }: { label: string; value: number; color
   );
 }
 
+// ==================== SETTINGS VIEW ====================
+function SettingsView({ settings, setSettings, showToast }: { settings: Settings; setSettings: (s: Settings) => void; showToast: (m: string) => void }) {
+  const [localSettings, setLocalSettings] = useState<Settings>(settings);
+
+  const saveSettings = () => {
+    setSettings(localSettings);
+    showToast('Settings saved');
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div className="panel">
+        <h2 className="font-display text-2xl font-bold mb-6" style={{color:'var(--amber)'}}>⚙ SETTINGS</h2>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold mb-2" style={{color:'var(--cyan)'}}>Test File Size</label>
+            <p className="text-xs text-[var(--text-secondary)] mb-2">
+              The size of the test file used for benchmarks. Larger files provide more accurate results but take longer.
+            </p>
+            <div className="flex gap-3 items-center">
+              <input 
+                type="number" 
+                className="input max-w-[150px]" 
+                value={localSettings.testFileSizeMB}
+                onChange={e => setLocalSettings({...localSettings, testFileSizeMB: Math.max(16, parseInt(e.target.value) || 64)})}
+                min="16"
+                max="1024"
+              />
+              <span className="text-sm text-[var(--text-secondary)]">MB</span>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => setLocalSettings({...localSettings, testFileSizeMB: 64})} className="btn-secondary text-xs">64 MB (Quick)</button>
+              <button onClick={() => setLocalSettings({...localSettings, testFileSizeMB: 256})} className="btn-secondary text-xs">256 MB (Standard)</button>
+              <button onClick={() => setLocalSettings({...localSettings, testFileSizeMB: 1024})} className="btn-secondary text-xs">1 GB (Thorough)</button>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-[var(--border)]">
+            <button onClick={saveSettings} className="btn-primary">💾 Save Settings</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==================== NEW TEST VIEW ====================
-function NewTestView({ profiles, models, token, probeOnline, onSaved }: { profiles: Profile[]; models: ModelFamily[]; token: string; probeOnline: boolean; onSaved: () => void }) {
+function NewTestView({ profiles, models, token, probeOnline, settings, onSaved }: { profiles: Profile[]; models: ModelFamily[]; token: string; probeOnline: boolean; settings: Settings; onSaved: () => void }) {
   const [step, setStep] = useState(1);
   const [probeDrives, setProbeDrives] = useState<ProbeDrive[]>([]);
   const [selectedDrive, setSelectedDrive] = useState<ProbeDrive | null>(null);
@@ -568,12 +628,14 @@ function NewTestView({ profiles, models, token, probeOnline, onSaved }: { profil
     setRunning(mod);
     try {
       let result: any;
+      const testSizeMB = settings.testFileSizeMB || 64;
+      console.log('[BENCHMARK] Using test file size:', testSizeMB, 'MB');
       switch (mod) {
         case 'seq':
-          result = await probe('/bench/seq', { drive: letter, op: 'both', sizeMB: 64 });
+          result = await probe('/bench/seq', { drive: letter, op: 'both', sizeMB: testSizeMB });
           break;
         case 'rnd':
-          result = await probe('/bench/rnd', { drive: letter, op: 'both', seconds: 3, sizeMB: 64 });
+          result = await probe('/bench/rnd', { drive: letter, op: 'both', seconds: 3, sizeMB: testSizeMB });
           break;
         case 'qd':
           const [seqQ8R, seqQ8W, rndQ32R, rndQ32W] = await Promise.all([
@@ -585,13 +647,13 @@ function NewTestView({ profiles, models, token, probeOnline, onSaved }: { profil
           result = { seqQ8R: seqQ8R.mbps, seqQ8W: seqQ8W.mbps, rndQ32R: rndQ32R.mbps, rndQ32W: rndQ32W.mbps };
           break;
         case 'mix':
-          result = await probe('/bench/mix', { drive: letter, seconds: 5, sizeMB: 64 });
+          result = await probe('/bench/mix', { drive: letter, seconds: 5, sizeMB: testSizeMB });
           break;
         case 'sustained':
-          result = await probe('/bench/sustained', { drive: letter, sizeMB: 256, percent: 0 });
+          result = await probe('/bench/sustained', { drive: letter, sizeMB: testSizeMB * 4, percent: 0 });
           break;
         case 'verify':
-          result = await probe('/bench/verify', { drive: letter, sizeMB: 16 });
+          result = await probe('/bench/verify', { drive: letter, sizeMB: Math.min(testSizeMB, 64) });
           break;
       }
       console.log(`[BENCHMARK] ${mod} result:`, result);
@@ -980,9 +1042,10 @@ function DriveDrawer({ drive, drives, lifecycle, models, labels, token, onClose,
     if (!confirm('Delete this record?')) return;
     try {
       await api(`/api/drives/${drive.id}`, 'DELETE', null, token);
-      onRefresh();
-      onClose();
       showToast('Record deleted');
+      onClose();
+      // Refresh after closing to avoid race condition
+      setTimeout(() => onRefresh(), 100);
     } catch (e: any) { showToast(e.message); }
   };
 
@@ -1093,9 +1156,21 @@ function AdminProfiles({ profiles, token, onRefresh, showToast }: { profiles: Pr
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Profile>>({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 });
 
-  const startEdit = (p: Profile) => { setEditing(p); setForm(p); setShowForm(true); };
-  const startNew = () => { setEditing(null); setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 }); setShowForm(true); };
+  const startEdit = (p: Profile) => { 
+    console.log('[PROFILE] Starting edit:', p);
+    setEditing(p); 
+    setForm(p); 
+    setShowForm(true); 
+  };
+  const startNew = () => { 
+    console.log('[PROFILE] Starting new profile');
+    setEditing(null); 
+    setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 }); 
+    setShowForm(true); 
+    console.log('[PROFILE] showForm set to true');
+  };
   const cancelEdit = () => { 
+    console.log('[PROFILE] Canceling edit');
     setEditing(null); 
     setShowForm(false);
     setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 }); 
