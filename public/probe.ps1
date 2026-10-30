@@ -83,31 +83,40 @@ function Get-WritableFolder($driveLetter) {
         return $null
     }
     
+    # Check if we already found a writable folder for this drive
     if ($script:WritableFolders.ContainsKey($driveLetter)) {
-        return $script:WritableFolders[$driveLetter]
+        $cached = $script:WritableFolders[$driveLetter]
+        Write-Host "[WRITABLE] Using cached folder for $driveLetter`: $cached" -ForegroundColor Gray
+        return $cached
     }
     
     # Try drive letter locations first
     $candidates = @(
-        "${driveLetter}:\"
         "${driveLetter}:\TestDeck"
         "${driveLetter}:\ProgramData\TestDeck"
         "${driveLetter}:\Users\Public\TestDeck"
+        "${driveLetter}:\"
     )
     
-    # Add fallback locations (user-specific folders)
-    $tempPath = $env:TEMP
+    # Add fallback locations (user-specific folders on the same drive)
     $userProfile = $env:USERPROFILE
-    if ($tempPath) {
-        $candidates += "$tempPath\TestDeck"
-    }
-    if ($userProfile) {
+    if ($userProfile -and $userProfile.StartsWith("${driveLetter}:")) {
         $candidates += "$userProfile\Downloads\TestDeck"
         $candidates += "$userProfile\Desktop\TestDeck"
+        $candidates += "$userProfile\AppData\Local\Temp\TestDeck"
     }
+    
+    # Add TEMP folder as last resort
+    $tempPath = $env:TEMP
+    if ($tempPath -and $tempPath.StartsWith("${driveLetter}:")) {
+        $candidates += "$tempPath\TestDeck"
+    }
+    
+    Write-Host "[WRITABLE] Trying $($candidates.Count) candidate folders for drive $driveLetter" -ForegroundColor Cyan
     
     foreach ($cand in $candidates) {
         try {
+            Write-Host "[WRITABLE] Testing: $cand" -ForegroundColor Gray
             if (-not (Test-Path $cand)) {
                 New-Item -ItemType Directory -Path $cand -Force -ErrorAction Stop | Out-Null
             }
@@ -124,6 +133,7 @@ function Get-WritableFolder($driveLetter) {
     }
     
     Write-Host "[WRITABLE] ERROR: No writable folder found for drive $driveLetter" -ForegroundColor Red
+    Write-Host "[WRITABLE] Tried: $($candidates -join ', ')" -ForegroundColor Red
     return $null
 }
 
@@ -214,10 +224,6 @@ function Get-DriveInventory {
             default { "Unknown" }
         }
 
-        # Health and operational status
-        $info.healthStatus = $disk.HealthStatus
-        $info.operationalStatus = $disk.OperationalStatus
-
         # Serial from CIM fallback
         try {
             $cimDisk = Get-CimInstance -ClassName Win32_DiskDrive -Filter "Index=$diskNum" -ErrorAction Stop
@@ -245,7 +251,8 @@ function Get-DriveInventory {
             $partitions = Get-Partition -DiskNumber $diskNum -ErrorAction Stop
             foreach ($part in $partitions) {
                 $letter = [string]$part.DriveLetter
-                if (-not [string]::IsNullOrWhiteSpace($letter) -and $letter.Length -eq 1) {
+                # Only add valid drive letters (A-Z)
+                if ($letter -match '^[A-Z]$') {
                     [void]$info.letters.Add($letter)
                 }
             }
@@ -260,7 +267,8 @@ function Get-DriveInventory {
                     foreach ($ld in $logDisks) {
                         if ($ld.DeviceID.Length -ge 1) {
                             $letter = [string]$ld.DeviceID[0]
-                            if ($letter.Length -eq 1) {
+                            # Only add valid drive letters (A-Z)
+                            if ($letter -match '^[A-Z]$') {
                                 [void]$info.letters.Add($letter)
                             }
                         }
@@ -973,26 +981,28 @@ function ConvertTo-SafeJson($obj) {
         return Escape-JsonString $obj.ToString()
     }
     
-    # Handle objects with Length property but no Keys (PSObject wrappers, enums)
-    if ($obj.PSObject.Properties.Name -contains 'Length' -and $obj.PSObject.Properties.Name -notcontains 'Keys') {
-        # This is likely an enum or PSObject wrapper, convert to string
-        return Escape-JsonString $obj.ToString()
-    }
-    
     # Handle any other object type - convert to string
-    if ($obj -ne $null -and $obj.GetType().Name -ne 'String') {
-        # Try to convert to string, handle special cases
+    # This includes PSObject wrappers, enums, and other complex types
+    if ($obj -ne $null) {
         try {
+            # Try to get the string representation
             $strValue = $obj.ToString()
-            # If it looks like an object dump (contains Length property), extract the value
-            if ($strValue -match '^\{.*Length.*\}$') {
-                # This is an enum or similar, try to get the actual value
-                if ($obj -is [Microsoft.PowerShell.Commands.HealthStatus]) {
-                    return Escape-JsonString $obj.ToString()
-                }
+            
+            # If it's a simple string (not an object dump), use it
+            if ($strValue -notmatch '^\{.*\}$' -and $strValue -notmatch '^@{.*\}$') {
+                return Escape-JsonString $strValue
             }
+            
+            # If it looks like an object dump, try to extract the value
+            # For enums, ToString() usually returns the enum name
+            if ($obj.GetType().BaseType -eq [System.Enum]) {
+                return Escape-JsonString $obj.ToString()
+            }
+            
+            # Fallback: use ToString()
             return Escape-JsonString $strValue
         } catch {
+            # If ToString() fails, use the type name
             return Escape-JsonString $obj.GetType().Name
         }
     }
