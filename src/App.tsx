@@ -62,6 +62,14 @@ async function probe(path: string, body?: any): Promise<any> {
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json();
+    
+    // Handle PowerShell 5.1 array unwrapping issue
+    // If data is an array like [true, {actual data}], extract the object
+    if (Array.isArray(data) && data.length === 2 && typeof data[0] === 'boolean') {
+      console.log('[PROBE] Received array response, extracting object:', data[1]);
+      return data[1];
+    }
+    
     return data;
   } catch (e) {
     console.error('[PROBE] Error calling', path, ':', e);
@@ -1048,7 +1056,7 @@ function DriveDrawer({ drive, drives, lifecycle, models, labels, token, onClose,
           <button onClick={deleteDrive} className="btn-danger text-sm">🗑 Delete</button>
         </div>
 
-        {drive.notes && <div className="mt-4 text-sm text-[var(--text-secondary)] italic">Notes: {drive.notes}</div>}
+        {drive.notes && <div className="mt-4 text-sm text-[var(--text-secondary)] italic">Notes: {String(drive.notes)}</div>}
       </div>
     </>
   );
