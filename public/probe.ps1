@@ -86,12 +86,26 @@ function Get-WritableFolder($driveLetter) {
     if ($script:WritableFolders.ContainsKey($driveLetter)) {
         return $script:WritableFolders[$driveLetter]
     }
+    
+    # Try drive letter locations first
     $candidates = @(
         "${driveLetter}:\"
         "${driveLetter}:\TestDeck"
         "${driveLetter}:\ProgramData\TestDeck"
         "${driveLetter}:\Users\Public\TestDeck"
     )
+    
+    # Add fallback locations (user-specific folders)
+    $tempPath = $env:TEMP
+    $userProfile = $env:USERPROFILE
+    if ($tempPath) {
+        $candidates += "$tempPath\TestDeck"
+    }
+    if ($userProfile) {
+        $candidates += "$userProfile\Downloads\TestDeck"
+        $candidates += "$userProfile\Desktop\TestDeck"
+    }
+    
     foreach ($cand in $candidates) {
         try {
             if (-not (Test-Path $cand)) {
@@ -101,11 +115,15 @@ function Get-WritableFolder($driveLetter) {
             [System.IO.File]::WriteAllText($testFile, "test")
             Remove-Item $testFile -Force -ErrorAction SilentlyContinue
             $script:WritableFolders[$driveLetter] = $cand
+            Write-Host "[WRITABLE] Found writable folder: $cand" -ForegroundColor Green
             return $cand
         } catch {
+            Write-Host "[WRITABLE] Cannot write to $cand : $($_.Exception.Message)" -ForegroundColor Yellow
             continue
         }
     }
+    
+    Write-Host "[WRITABLE] ERROR: No writable folder found for drive $driveLetter" -ForegroundColor Red
     return $null
 }
 
@@ -955,10 +973,28 @@ function ConvertTo-SafeJson($obj) {
         return Escape-JsonString $obj.ToString()
     }
     
-    # Handle objects with Length property (PSObject wrappers)
+    # Handle objects with Length property but no Keys (PSObject wrappers, enums)
     if ($obj.PSObject.Properties.Name -contains 'Length' -and $obj.PSObject.Properties.Name -notcontains 'Keys') {
         # This is likely an enum or PSObject wrapper, convert to string
         return Escape-JsonString $obj.ToString()
+    }
+    
+    # Handle any other object type - convert to string
+    if ($obj -ne $null -and $obj.GetType().Name -ne 'String') {
+        # Try to convert to string, handle special cases
+        try {
+            $strValue = $obj.ToString()
+            # If it looks like an object dump (contains Length property), extract the value
+            if ($strValue -match '^\{.*Length.*\}$') {
+                # This is an enum or similar, try to get the actual value
+                if ($obj -is [Microsoft.PowerShell.Commands.HealthStatus]) {
+                    return Escape-JsonString $obj.ToString()
+                }
+            }
+            return Escape-JsonString $strValue
+        } catch {
+            return Escape-JsonString $obj.GetType().Name
+        }
     }
     
     # Fallback: convert to string
