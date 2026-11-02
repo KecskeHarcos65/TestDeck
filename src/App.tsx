@@ -41,8 +41,8 @@ interface Settings {
 }
 
 // ==================== API ====================
-const API_BASE = window.location.origin && window.location.origin !== 'null' 
-  ? window.location.origin 
+const API_BASE = window.location.origin && window.location.origin !== 'null'
+  ? window.location.origin
   : 'http://localhost:8080';
 const PROBE_BASE = 'http://127.0.0.1:8321';
 
@@ -65,14 +65,14 @@ async function probe(path: string, body?: any): Promise<any> {
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json();
-    
+
     // Handle PowerShell 5.1 array unwrapping issue
     // If data is an array like [true, {actual data}], extract the object
     if (Array.isArray(data) && data.length === 2 && typeof data[0] === 'boolean') {
       console.log('[PROBE] Received array response, extracting object:', data[1]);
       return data[1];
     }
-    
+
     return data;
   } catch (e) {
     console.error('[PROBE] Error calling', path, ':', e);
@@ -199,28 +199,28 @@ export default function App() {
   useEffect(() => {
     console.log('[HEALTH CHECK] API_BASE:', API_BASE);
     console.log('[HEALTH CHECK] PROBE_BASE:', PROBE_BASE);
-    
+
     fetch(`${API_BASE}/api/health`)
       .then(r => {
         console.log('[HEALTH CHECK] Server response status:', r.status);
         return r.json();
       })
       .then(data => {
-        console.log('[HEALTH CHECK] Server health data:', data);
+        console.log('[HEALTH CHECK] Server health ', data);
         setServerOnline(true);
       })
       .catch(err => {
         console.error('[HEALTH CHECK] Server error:', err);
         setServerOnline(false);
       });
-    
+
     fetch(`${PROBE_BASE}/ping`)
       .then(r => {
         console.log('[HEALTH CHECK] Probe response status:', r.status);
         return r.json();
       })
       .then(data => {
-        console.log('[HEALTH CHECK] Probe health data:', data);
+        console.log('[HEALTH CHECK] Probe health ', data);
         setProbeOnline(true);
       })
       .catch(err => {
@@ -245,7 +245,7 @@ export default function App() {
       setLabels(Array.isArray(l) ? l : []);
       setModels(Array.isArray(m) ? m : []);
       setLifecycle(Array.isArray(lc) ? lc : []);
-    } catch (e) { 
+    } catch (e) {
       console.error('[LOAD DATA] Error:', e);
       setDrives([]);
       setProfiles([]);
@@ -336,9 +336,9 @@ export default function App() {
             <span><span className={`led ${probeOnline ? 'led-green' : 'led-off'}`}></span>PROBE</span>
           </div>
           <div className="relative">
-            <button 
+            <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 px-3 py-1 rounded text-sm" 
+              className="flex items-center gap-2 px-3 py-1 rounded text-sm"
               style={{background:'var(--bg-card)'}}
             >
               <span className="font-mono">{user.name}</span>
@@ -545,7 +545,7 @@ function SettingsView({ settings, setSettings, showToast }: { settings: Settings
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="panel">
         <h2 className="font-display text-2xl font-bold mb-6" style={{color:'var(--amber)'}}>⚙ SETTINGS</h2>
-        
+
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-bold mb-2" style={{color:'var(--cyan)'}}>Test File Size</label>
@@ -553,9 +553,9 @@ function SettingsView({ settings, setSettings, showToast }: { settings: Settings
               The size of the test file used for benchmarks. Larger files provide more accurate results but take longer.
             </p>
             <div className="flex gap-3 items-center">
-              <input 
-                type="number" 
-                className="input max-w-[150px]" 
+              <input
+                type="number"
+                className="input max-w-[150px]"
                 value={localSettings.testFileSizeMB}
                 onChange={e => setLocalSettings({...localSettings, testFileSizeMB: Math.max(16, parseInt(e.target.value) || 64)})}
                 min="16"
@@ -1156,24 +1156,24 @@ function AdminProfiles({ profiles, token, onRefresh, showToast }: { profiles: Pr
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Profile>>({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 });
 
-  const startEdit = (p: Profile) => { 
+  const startEdit = (p: Profile) => {
     console.log('[PROFILE] Starting edit:', p);
-    setEditing(p); 
-    setForm(p); 
-    setShowForm(true); 
+    setEditing(p);
+    setForm(p);
+    setShowForm(true);
   };
-  const startNew = () => { 
+  const startNew = () => {
     console.log('[PROFILE] Starting new profile');
-    setEditing(null); 
-    setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 }); 
-    setShowForm(true); 
+    setEditing(null);
+    setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 });
+    setShowForm(true);
     console.log('[PROFILE] showForm set to true');
   };
-  const cancelEdit = () => { 
+  const cancelEdit = () => {
     console.log('[PROFILE] Canceling edit');
-    setEditing(null); 
+    setEditing(null);
     setShowForm(false);
-    setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 }); 
+    setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 });
   };
 
   const save = async () => {
@@ -1185,9 +1185,9 @@ function AdminProfiles({ profiles, token, onRefresh, showToast }: { profiles: Pr
       setShowForm(false);
       setForm({ name:'', matchSubstring:'', bus:'ANY', media:'ANY', minSeqR:500, minSeqW:400, min4kR:25, min4kW:50, tolerancePct:15, ratedTBW:0 });
       showToast('Profile saved');
-    } catch (e: any) { 
+    } catch (e: any) {
       console.error('[PROFILE SAVE] Error:', e);
-      showToast(e.message || 'Failed to save profile'); 
+      showToast(e.message || 'Failed to save profile');
     }
   };
 
