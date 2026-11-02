@@ -82,14 +82,14 @@ function Get-WritableFolder($driveLetter) {
         Write-Host "[WRITABLE] ERROR: driveLetter parameter is null or empty" -ForegroundColor Red
         return $null
     }
-    
+
     # Check if we already found a writable folder for this drive
     if ($script:WritableFolders.ContainsKey($driveLetter)) {
         $cached = $script:WritableFolders[$driveLetter]
         Write-Host "[WRITABLE] Using cached folder for $driveLetter`: $cached" -ForegroundColor Gray
         return $cached
     }
-    
+
     # Try drive letter locations first
     $candidates = @(
         "${driveLetter}:\TestDeck"
@@ -97,7 +97,7 @@ function Get-WritableFolder($driveLetter) {
         "${driveLetter}:\Users\Public\TestDeck"
         "${driveLetter}:\"
     )
-    
+
     # Add fallback locations (user-specific folders on the same drive)
     $userProfile = $env:USERPROFILE
     if ($userProfile -and $userProfile.StartsWith("${driveLetter}:")) {
@@ -105,15 +105,15 @@ function Get-WritableFolder($driveLetter) {
         $candidates += "$userProfile\Desktop\TestDeck"
         $candidates += "$userProfile\AppData\Local\Temp\TestDeck"
     }
-    
+
     # Add TEMP folder as last resort
     $tempPath = $env:TEMP
     if ($tempPath -and $tempPath.StartsWith("${driveLetter}:")) {
         $candidates += "$tempPath\TestDeck"
     }
-    
+
     Write-Host "[WRITABLE] Trying $($candidates.Count) candidate folders for drive $driveLetter" -ForegroundColor Cyan
-    
+
     foreach ($cand in $candidates) {
         try {
             Write-Host "[WRITABLE] Testing: $cand" -ForegroundColor Gray
@@ -131,7 +131,7 @@ function Get-WritableFolder($driveLetter) {
             continue
         }
     }
-    
+
     Write-Host "[WRITABLE] ERROR: No writable folder found for drive $driveLetter" -ForegroundColor Red
     Write-Host "[WRITABLE] Tried: $($candidates -join ', ')" -ForegroundColor Red
     return $null
@@ -157,7 +157,7 @@ $script:DriveCacheTime = [DateTime]::MinValue
 
 function Get-DriveInventory {
     Write-Host "[INVENTORY] Starting drive inventory scan..." -ForegroundColor Cyan
-    
+
     if ($null -ne $script:DriveCache -and ((Get-Date) - $script:DriveCacheTime).TotalSeconds -lt 2) {
         Write-Host "[INVENTORY] Using cached data (age: $([math]::Round(((Get-Date) - $script:DriveCacheTime).TotalSeconds, 1))s)" -ForegroundColor Gray
         return ,$script:DriveCache
@@ -208,7 +208,7 @@ function Get-DriveInventory {
             5 { "SATA" }  # AHCI
             11 { "NVMe" }
             17 { "NVMe" }
-            default { 
+            default {
                 if ($disk.FriendlyName -match "NVMe|Samsung 9|WD SN|Intel SSDPE") { "NVMe" }
                 elseif ($disk.FriendlyName -match "USB|External") { "USB" }
                 else { "SATA" }
@@ -262,7 +262,7 @@ function Get-DriveInventory {
             try {
                 $cimParts = Get-CimInstance -ClassName Win32_DiskPartition -Filter "DiskIndex=$diskNum" -ErrorAction Stop
                 foreach ($part in $cimParts) {
-                    $logDisks = Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction SilentlyContinue | 
+                    $logDisks = Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction SilentlyContinue |
                         Where-Object { $_.DeviceID -match ($part.DeviceID -replace '\\','') }
                     foreach ($ld in $logDisks) {
                         if ($ld.DeviceID.Length -ge 1) {
@@ -310,7 +310,7 @@ function Get-DriveInventory {
 function Run-RndBench($driveLetter, $op, $seconds, $sizeMB) {
     Write-Host "[RND] Starting RND benchmark on drive $driveLetter, op=$op, seconds=$seconds, size=$sizeMB MB" -ForegroundColor Cyan
     $folder = Get-WritableFolder $driveLetter
-    if ($null -eq $folder) { 
+    if ($null -eq $folder) {
         $errorObj = New-Object PSObject
         $errorObj | Add-Member -MemberType NoteProperty -Name "error" -Value "No writable folder on $driveLetter"
         return ,$errorObj
@@ -584,7 +584,7 @@ function Run-QdBench($driveLetter, $kind, $q, $seconds, $op) {
             for ($i = 0; $i -lt $q; $i++) {
                 $slotOffset = [long](($totalOps + $i) % $fileBlocks) * $blockSize
                 [TestDeckWin32]::SetFilePointerEx($handle, $slotOffset, [IntPtr]::Zero, $FILE_BEGIN) | Out-Null
-                
+
                 if ($op -eq "read") {
                     $br = [uint32]0
                     [TestDeckWin32]::ReadFile($handle, $buf.AlignedPtr, [uint32]$blockSize, [ref]$br, [IntPtr]::Zero) | Out-Null
@@ -797,7 +797,7 @@ function Run-SustainedBench($driveLetter, $sizeMB, $percent) {
         }
 
         # Tail average (after cache)
-        $tailStart = if ($cacheMB -gt 0) { 
+        $tailStart = if ($cacheMB -gt 0) {
             $idx = 0
             for ($i = 0; $i -lt $series.Count; $i++) { if ($series[$i].cum -ge $cacheMB) { $idx = $i; break } }
             $idx
@@ -866,7 +866,7 @@ function Run-VerifyBench($driveLetter, $sizeMB) {
             [System.Runtime.InteropServices.Marshal]::Copy($tempBuf, 0, $buf.AlignedPtr, $BLOCK_SIZE)
 
             # Write
-            $handle = [TestDeckWin32]::CreateFile($filePath, $GENERIC_WRITE, $FILE_SHARE_RW, [IntPtr]::Zero, 
+            $handle = [TestDeckWin32]::CreateFile($filePath, $GENERIC_WRITE, $FILE_SHARE_RW, [IntPtr]::Zero,
                 $(if ($block -eq 0) { $CREATE_ALWAYS } else { $OPEN_EXISTING }), [uint32]$FILE_FLAG_NO_BUFFERING, [IntPtr]::Zero)
             if ($handle.IsInvalid) {
                 $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
@@ -955,7 +955,7 @@ function Run-Cleanup() {
 function ConvertTo-PSCustomObject($hashtable) {
     if ($null -eq $hashtable) { return $null }
     if ($hashtable -isnot [hashtable]) { return $hashtable }
-    
+
     $obj = New-Object PSObject
     foreach ($key in $hashtable.Keys) {
         $obj | Add-Member -MemberType NoteProperty -Name $key -Value $hashtable[$key]
@@ -966,7 +966,7 @@ function ConvertTo-PSCustomObject($hashtable) {
 # --- JSON Helper ---
 function Escape-JsonString($str) {
     if ($null -eq $str) { return "null" }
-    
+
     $str = [string]$str
     $str = $str -replace '\\', '\\\\'
     $str = $str -replace '"', '\"'
@@ -974,13 +974,13 @@ function Escape-JsonString($str) {
     $str = $str -replace "`r", '\r'
     $str = $str -replace "`t", '\t'
     $str = $str -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''
-    
+
     return "`"$str`""
 }
 
 function ConvertTo-SafeJson($obj) {
     if ($null -eq $obj) { return "null" }
-    
+
     # Handle ArrayList
     if ($obj -is [System.Collections.ArrayList]) {
         $items = @()
@@ -989,7 +989,7 @@ function ConvertTo-SafeJson($obj) {
         }
         return "[" + ($items -join ",") + "]"
     }
-    
+
     # Handle Array
     if ($obj -is [array]) {
         $items = @()
@@ -998,7 +998,7 @@ function ConvertTo-SafeJson($obj) {
         }
         return "[" + ($items -join ",") + "]"
     }
-    
+
     # Handle Hashtable
     if ($obj -is [hashtable]) {
         $pairs = @()
@@ -1010,7 +1010,7 @@ function ConvertTo-SafeJson($obj) {
         }
         return "{" + ($pairs -join ",") + "}"
     }
-    
+
     # Handle PSCustomObject
     if ($obj -is [PSCustomObject]) {
         $pairs = @()
@@ -1023,48 +1023,48 @@ function ConvertTo-SafeJson($obj) {
         }
         return "{" + ($pairs -join ",") + "}"
     }
-    
+
     # Handle primitive types
     if ($obj -is [string]) {
         return Escape-JsonString $obj
     }
-    
+
     if ($obj -is [bool]) {
         return $obj.ToString().ToLower()
     }
-    
+
     # Handle numeric types with invariant culture (use dot, not comma)
     if ($obj -is [int] -or $obj -is [long]) {
         return $obj.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     }
-    
+
     if ($obj -is [double] -or $obj -is [float] -or $obj -is [decimal]) {
         return $obj.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     }
-    
+
     # Handle enum types (convert to string)
     if ($obj -is [enum]) {
         return Escape-JsonString $obj.ToString()
     }
-    
+
     # Handle any other object type - convert to string
     # This includes PSObject wrappers, enums, and other complex types
     if ($obj -ne $null) {
         try {
             # Try to get the string representation
             $strValue = $obj.ToString()
-            
+
             # If it's a simple string (not an object dump), use it
             if ($strValue -notmatch '^\{.*\}$' -and $strValue -notmatch '^@{.*\}$') {
                 return Escape-JsonString $strValue
             }
-            
+
             # If it looks like an object dump, try to extract the value
             # For enums, ToString() usually returns the enum name
             if ($obj.GetType().BaseType -eq [System.Enum]) {
                 return Escape-JsonString $obj.ToString()
             }
-            
+
             # Fallback: use ToString()
             return Escape-JsonString $strValue
         } catch {
@@ -1072,7 +1072,7 @@ function ConvertTo-SafeJson($obj) {
             return Escape-JsonString $obj.GetType().Name
         }
     }
-    
+
     # Fallback: convert to string
     return Escape-JsonString $obj.ToString()
 }
@@ -1080,7 +1080,7 @@ function ConvertTo-SafeJson($obj) {
 # --- HTTP Handling ---
 function Send-ProbeResponse($stream, $statusCode, $statusText, $obj) {
     $json = ConvertTo-SafeJson $obj
-    
+
     Write-Host "[RESPONSE] JSON: $json" -ForegroundColor Gray
     Write-Host "[RESPONSE] JSON length: $($json.Length) chars" -ForegroundColor Gray
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
@@ -1122,13 +1122,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-SEQ] Running SEQ benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-SeqBench $data.drive $data.op $data.sizeMB
-        
+
         # Handle PowerShell 5.1 array unwrapping
         if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
             Write-Host "[BENCH-SEQ] Detected array unwrapping, extracting object" -ForegroundColor Yellow
             $result = $result[1]
         }
-        
+
         Write-Host "[BENCH-SEQ] Result: readMbps=$($result.readMbps), writeMbps=$($result.writeMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1137,13 +1137,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-RND] Running RND benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-RndBench $data.drive $data.op $data.seconds $data.sizeMB
-        
+
         # Handle PowerShell 5.1 array unwrapping
         if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
             Write-Host "[BENCH-RND] Detected array unwrapping, extracting object" -ForegroundColor Yellow
             $result = $result[1]
         }
-        
+
         Write-Host "[BENCH-RND] Result: readMbps=$($result.readMbps), writeMbps=$($result.writeMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1152,13 +1152,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-QD] Running QD benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-QdBench $data.drive $data.kind $data.q $data.seconds $data.op
-        
+
         # Handle PowerShell 5.1 array unwrapping
         if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
             Write-Host "[BENCH-QD] Detected array unwrapping, extracting object" -ForegroundColor Yellow
             $result = $result[1]
         }
-        
+
         Write-Host "[BENCH-QD] Result: mbps=$($result.mbps), iops=$($result.iops)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1167,13 +1167,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-MIX] Running MIX benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-MixBench $data.drive $data.seconds $data.sizeMB
-        
+
         # Handle PowerShell 5.1 array unwrapping
         if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
             Write-Host "[BENCH-MIX] Detected array unwrapping, extracting object" -ForegroundColor Yellow
             $result = $result[1]
         }
-        
+
         Write-Host "[BENCH-MIX] Result: readMbps=$($result.readMbps), writeMbps=$($result.writeMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1182,13 +1182,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-SUSTAINED] Running SUSTAINED benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-SustainedBench $data.drive $data.sizeMB $data.percent
-        
+
         # Handle PowerShell 5.1 array unwrapping
         if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
             Write-Host "[BENCH-SUSTAINED] Detected array unwrapping, extracting object" -ForegroundColor Yellow
             $result = $result[1]
         }
-        
+
         Write-Host "[BENCH-SUSTAINED] Result: sustainedMbps=$($result.sustainedMbps)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1197,13 +1197,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
         $data = $body | ConvertFrom-Json
         Write-Host "[BENCH-VERIFY] Running VERIFY benchmark on drive $($data.drive)" -ForegroundColor Cyan
         $result = Run-VerifyBench $data.drive $data.sizeMB
-        
+
         # Handle PowerShell 5.1 array unwrapping
         if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
             Write-Host "[BENCH-VERIFY] Detected array unwrapping, extracting object" -ForegroundColor Yellow
             $result = $result[1]
         }
-        
+
         Write-Host "[BENCH-VERIFY] Result: testedMB=$($result.testedMB), badBlocks=$($result.badBlocks)" -ForegroundColor Green
         Send-ProbeResponse $stream 200 "OK" $result
         return
@@ -1211,13 +1211,13 @@ function Handle-ProbeRequest($stream, $method, $path, $body) {
     if ($path -eq "/bench/cleanup" -and $method -eq "POST") {
         Write-Host "[BENCH-CLEANUP] Running cleanup" -ForegroundColor Cyan
         $result = Run-Cleanup
-        
+
         # Handle PowerShell 5.1 array unwrapping
         if ($result -is [array] -and $result.Length -eq 2 -and $result[0] -is [bool]) {
             Write-Host "[BENCH-CLEANUP] Detected array unwrapping, extracting object" -ForegroundColor Yellow
             $result = $result[1]
         }
-        
+
         Send-ProbeResponse $stream 200 "OK" $result
         return
     }
