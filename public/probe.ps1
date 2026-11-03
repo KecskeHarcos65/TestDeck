@@ -224,26 +224,53 @@ function Get-DriveInventory {
             default { "Unknown" }
         }
 
-        # Serial from CIM fallback
+        # Serial and model from CIM - especially important for USB devices
         try {
             $cimDisk = Get-CimInstance -ClassName Win32_DiskDrive -Filter "Index=$diskNum" -ErrorAction Stop
             if ($null -ne $cimDisk) {
-                $info.serial = [string]$cimDisk.SerialNumber
-                $info.firmware = [string]$cimDisk.FirmwareRevision
-                $info.fwSrc = "CIM"
-                if ([string]::IsNullOrWhiteSpace($info.model) -or $info.model -eq "Disk drive") {
-                    $info.model = [string]$cimDisk.Model
+                # For USB devices, Win32_DiskDrive often has better info than Get-Disk
+                $cimModel = [string]$cimDisk.Model
+                $cimSerial = [string]$cimDisk.SerialNumber
+                $cimFirmware = [string]$cimDisk.FirmwareRevision
+                
+                Write-Host "[INVENTORY] CIM data - Model: $cimModel, Serial: $cimSerial, FW: $cimFirmware" -ForegroundColor Gray
+                
+                # Use CIM data if it's more detailed than Get-Disk
+                if (-not [string]::IsNullOrWhiteSpace($cimSerial)) {
+                    $info.serial = $cimSerial
+                }
+                if (-not [string]::IsNullOrWhiteSpace($cimFirmware)) {
+                    $info.firmware = $cimFirmware
+                    $info.fwSrc = "CIM"
+                }
+                # For USB devices, CIM model is often the actual drive model
+                if ($info.bus -eq "USB") {
+                    if (-not [string]::IsNullOrWhiteSpace($cimModel) -and $cimModel -ne "Disk drive") {
+                        $info.model = $cimModel
+                        Write-Host "[INVENTORY] USB device: Using CIM model: $cimModel" -ForegroundColor Cyan
+                    }
+                } elseif ([string]::IsNullOrWhiteSpace($info.model) -or $info.model -eq "Disk drive") {
+                    $info.model = $cimModel
                 }
             }
         } catch {
-            # Try alternate serial source
-            try {
-                $physMedia = Get-PhysicalDisk -ErrorAction Stop | Where-Object { $_.DeviceId -eq $diskNum }
-                if ($null -ne $physMedia) {
+            Write-Host "[INVENTORY] CIM query failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        
+        # Try PhysicalDisk for additional info
+        try {
+            $physMedia = Get-PhysicalDisk -ErrorAction Stop | Where-Object { $_.DeviceId -eq $diskNum }
+            if ($null -ne $physMedia) {
+                if ([string]::IsNullOrWhiteSpace($info.serial)) {
                     $info.serial = [string]$physMedia.SerialNumber
-                    if ([string]::IsNullOrWhiteSpace($info.model)) { $info.model = [string]$physMedia.FriendlyName }
                 }
-            } catch {}
+                if ([string]::IsNullOrWhiteSpace($info.model) -or $info.model -eq "Disk drive") {
+                    $info.model = [string]$physMedia.FriendlyName
+                }
+                Write-Host "[INVENTORY] PhysicalDisk data - Model: $($physMedia.FriendlyName), Serial: $($physMedia.SerialNumber)" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "[INVENTORY] PhysicalDisk query failed: $($_.Exception.Message)" -ForegroundColor Yellow
         }
 
         # Letters via Get-Partition
@@ -281,6 +308,7 @@ function Get-DriveInventory {
         }
 
         # Storage Reliability Counter (may need elevation)
+        # For USB devices, this often fails because the USB enclosure doesn't pass through S.M.A.R.T. data
         try {
             $relCounter = Get-StorageReliabilityCounter -Disk $disk -ErrorAction Stop
             if ($null -ne $relCounter) {
@@ -289,10 +317,17 @@ function Get-DriveInventory {
                 $info.readErrors = if ($null -ne $relCounter.ReadErrorsTotal) { [long]$relCounter.ReadErrorsTotal } else { $null }
                 $info.writeErrors = if ($null -ne $relCounter.WriteErrorsTotal) { [long]$relCounter.WriteErrorsTotal } else { $null }
                 $info.relOk = $true
+                Write-Host "[INVENTORY] Reliability data available" -ForegroundColor Green
             }
         } catch {
             $info.relOk = $false
-            $info.relErr = "Requires elevation: $($_.Exception.Message)"
+            if ($info.bus -eq "USB") {
+                $info.relErr = "USB enclosure: S.M.A.R.T. data not accessible (requires direct SATA/NVMe connection or UASP-supporting enclosure)"
+                Write-Host "[INVENTORY] USB device: S.M.A.R.T. data not accessible through USB enclosure" -ForegroundColor Yellow
+            } else {
+                $info.relErr = "Requires elevation: $($_.Exception.Message)"
+                Write-Host "[INVENTORY] Reliability counter failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
 
         Write-Host "[INVENTORY] Added drive: $($info.model) | Bus: $($info.bus) | Media: $($info.media) | Letters: $($info.letters -join ',')" -ForegroundColor Green
