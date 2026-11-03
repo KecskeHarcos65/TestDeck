@@ -50,6 +50,20 @@ public class TestDeckWin32 {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool FlushFileBuffers(SafeFileHandle hFile);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool DeviceIoControl(
+        SafeFileHandle hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        uint nInBufferSize,
+        IntPtr lpOutBuffer,
+        uint nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
     public const uint GENERIC_READ = 0x80000000;
     public const uint GENERIC_WRITE = 0x40000000;
     public const uint FILE_SHARE_READ = 0x00000001;
@@ -58,6 +72,47 @@ public class TestDeckWin32 {
     public const uint OPEN_EXISTING = 3;
     public const uint FILE_FLAG_NO_BUFFERING = 0x20000000;
     public const uint FILE_BEGIN = 0;
+    
+    // IOCTL codes for SCSI/ATA pass-through
+    public const uint IOCTL_SCSI_PASS_THROUGH_DIRECT = 0x0004D014;
+    public const uint IOCTL_ATA_PASS_THROUGH_DIRECT = 0x0004D02C;
+    public const uint IOCTL_STORAGE_QUERY_PROPERTY = 0x002D1400;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct SCSI_PASS_THROUGH_DIRECT {
+    public ushort Length;
+    public byte ScsiStatus;
+    public byte PathId;
+    public byte TargetId;
+    public byte Lun;
+    public byte CdbLength;
+    public byte SenseInfoLength;
+    public byte DataIn;
+    public uint DataTransferLength;
+    public uint TimeOutValue;
+    public IntPtr DataBuffer;
+    public uint SenseInfoOffset;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+    public byte[] Cdb;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct ATA_PASS_THROUGH_DIRECT {
+    public ushort Length;
+    public ushort AtaFlags;
+    public byte PathId;
+    public byte TargetId;
+    public byte Lun;
+    public byte AsPathId;
+    public byte Reserved;
+    public uint TimeOutValue;
+    public uint DataBufferOffset;
+    public IntPtr DataBuffer;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+    public byte[] CurrentTaskFile;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+    public byte[] PreviousTaskFile;
 }
 "@
 
@@ -72,6 +127,192 @@ $OPEN_EXISTING = [uint32]3
 $FILE_FLAG_NO_BUFFERING = [uint32]536870912      # 0x20000000
 $FILE_BEGIN = [uint32]0
 $BLOCK_SIZE = 1048576  # 1 MiB
+
+# SCSI/ATA IOCTL codes
+$IOCTL_SCSI_PASS_THROUGH_DIRECT = [uint32]315412  # 0x0004D014
+$IOCTL_ATA_PASS_THROUGH_DIRECT = [uint32]315436   # 0x0004D02C
+
+# SCSI data direction
+$SCSI_IOCTL_DATA_OUT = 0
+$SCSI_IOCTL_DATA_IN = 1
+$SCSI_IOCTL_DATA_UNSPECIFIED = 2
+
+# ATA flags
+$ATA_FLAGS_DATA_IN = 0x02
+$ATA_FLAGS_DATA_OUT = 0x04
+$ATA_FLAGS_48BIT_COMMAND = 0x10
+
+# SMART commands
+$SMART_CMD_READ_DATA = 0xD0
+$SMART_CMD_READ_THRESHOLDS = 0xD1
+$SMART_CMD_ENABLE = 0xD3
+$SMART_CMD_DISABLE = 0xD4
+$SMART_CMD_RETURN_STATUS = 0xDA
+
+# --- S.M.A.R.T. Data Reading Functions ---
+function Get-SmartDataViaScsi($diskNumber) {
+    $devicePath = "\\.\PhysicalDrive$diskNumber"
+    Write-Host "[SMART] Opening device: $devicePath" -ForegroundColor Cyan
+    
+    try {
+        $handle = [TestDeckWin32]::CreateFile(
+            $devicePath,
+            $GENERIC_READ -bor $GENERIC_WRITE,
+            $FILE_SHARE_RW,
+            [IntPtr]::Zero,
+            $OPEN_EXISTING,
+            [uint32]0,
+            [IntPtr]::Zero
+        )
+        
+        if ($handle.IsInvalid) {
+            $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            Write-Host "[SMART] CreateFile failed (err=$err)" -ForegroundColor Red
+            return $null
+        }
+        
+        Write-Host "[SMART] Device opened successfully" -ForegroundColor Green
+        
+        # Allocate buffer for SMART data (512 bytes)
+        $smartBuffer = [System.Runtime.InteropServices.Marshal]::AllocHGlobal(512)
+        try {
+            # Initialize buffer to zero
+            for ($i = 0; $i -lt 512; $i++) {
+                [System.Runtime.InteropServices.Marshal]::WriteByte($smartBuffer, $i, 0)
+            }
+            
+            # Create SCSI_PASS_THROUGH_DIRECT structure
+            $sptdSize = [System.Runtime.InteropServices.Marshal]::SizeOf([Type][SCSI_PASS_THROUGH_DIRECT])
+            $sptdPtr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($sptdSize)
+            
+            try {
+                # Initialize SCSI_PASS_THROUGH_DIRECT
+                $sptd = New-Object SCSI_PASS_THROUGH_DIRECT
+                $sptd.Length = $sptdSize
+                $sptd.CdbLength = 12
+                $sptd.SenseInfoLength = 32
+                $sptd.DataIn = $SCSI_IOCTL_DATA_IN
+                $sptd.DataTransferLength = 512
+                $sptd.TimeOutValue = 10
+                $sptd.DataBuffer = $smartBuffer
+                $sptd.SenseInfoOffset = $sptdSize
+                
+                # Build ATA PASS THROUGH command for SMART READ DATA
+                # CDB: A1 10 00 00 00 01 00 00 00 00 B0 00
+                # A1 = ATA PASS THROUGH (12)
+                # 10 = Protocol: PIO Data-In
+                # B0 = SMART command
+                # 00 = SMART subcommand (D0 = READ DATA, but we use feature register)
+                $cdb = New-Object byte[] 16
+                $cdb[0] = 0xA1  # ATA PASS THROUGH (12)
+                $cdb[1] = 0x10  # Protocol: PIO Data-In
+                $cdb[2] = 0x00  # Flags
+                $cdb[3] = 0x00  # Reserved
+                $cdb[4] = 0x00  # Reserved
+                $cdb[5] = 0x01  # Sector count
+                $cdb[6] = 0x00  # LBA low
+                $cdb[7] = 0x00  # LBA mid
+                $cdb[8] = 0x00  # LBA high
+                $cdb[9] = 0x00  # Device
+                $cdb[10] = 0xB0 # Command: SMART
+                $cdb[11] = 0x00 # Feature: SMART READ DATA (D0)
+                
+                # Actually, the correct ATA SMART READ DATA command:
+                # Feature register: 0xD0 (SMART READ DATA)
+                # Command register: 0xB0 (SMART)
+                # Let me fix this:
+                $cdb[2] = 0xD0  # Feature (SMART READ DATA)
+                $cdb[5] = 0x01  # Sector count
+                $cdb[10] = 0x4F # LBA mid (SMART key)
+                $cdb[11] = 0xC2 # LBA high (SMART key)
+                $cdb[12] = 0xB0 # Command (SMART)
+                
+                $sptd.Cdb = $cdb
+                
+                # Marshal structure to pointer
+                [System.Runtime.InteropServices.Marshal]::StructureToPtr($sptd, $sptdPtr, $false)
+                
+                # Call DeviceIoControl
+                $bytesReturned = [uint32]0
+                $result = [TestDeckWin32]::DeviceIoControl(
+                    $handle,
+                    $IOCTL_SCSI_PASS_THROUGH_DIRECT,
+                    $sptdPtr,
+                    [uint32]$sptdSize,
+                    $sptdPtr,
+                    [uint32]$sptdSize,
+                    [ref]$bytesReturned,
+                    [IntPtr]::Zero
+                )
+                
+                if (-not $result) {
+                    $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                    Write-Host "[SMART] DeviceIoControl failed (err=$err)" -ForegroundColor Red
+                    return $null
+                }
+                
+                Write-Host "[SMART] SMART data retrieved successfully" -ForegroundColor Green
+                
+                # Parse SMART data
+                $smartData = @{}
+                
+                # Read SMART attributes (starting at offset 2)
+                # Each attribute is 12 bytes
+                $attributes = @()
+                for ($i = 0; $i -lt 30; $i++) {
+                    $offset = 2 + ($i * 12)
+                    $attrId = [System.Runtime.InteropServices.Marshal]::ReadByte($smartBuffer, $offset)
+                    if ($attrId -eq 0) { break }
+                    
+                    $attr = @{
+                        Id = $attrId
+                        Flags = [System.Runtime.InteropServices.Marshal]::ReadByte($smartBuffer, $offset + 1)
+                        Value = [System.Runtime.InteropServices.Marshal]::ReadByte($smartBuffer, $offset + 3)
+                        Worst = [System.Runtime.InteropServices.Marshal]::ReadByte($smartBuffer, $offset + 4)
+                        Raw = [System.Runtime.InteropServices.Marshal]::ReadInt64($smartBuffer, $offset + 5) -band 0xFFFFFFFFFFFF
+                    }
+                    $attributes += $attr
+                    
+                    # Temperature (attribute 194 or 190)
+                    if ($attrId -eq 194 -or $attrId -eq 190) {
+                        $smartData.Temperature = [int]($attr.Raw -band 0xFF)
+                        Write-Host "[SMART] Temperature: $($smartData.Temperature)°C" -ForegroundColor Green
+                    }
+                    
+                    # SSD Life Left / Media Wearout Indicator (attribute 232 or 233)
+                    if ($attrId -eq 232 -or $attrId -eq 233) {
+                        $smartData.WearLevel = 100 - $attr.Value
+                        Write-Host "[SMART] Wear Level: $($smartData.WearLevel)%" -ForegroundColor Green
+                    }
+                    
+                    # Power On Hours (attribute 9)
+                    if ($attrId -eq 9) {
+                        $smartData.PowerOnHours = $attr.Raw
+                        Write-Host "[SMART] Power On Hours: $($smartData.PowerOnHours)" -ForegroundColor Gray
+                    }
+                    
+                    # Reallocated Sectors (attribute 5)
+                    if ($attrId -eq 5) {
+                        $smartData.ReallocatedSectors = $attr.Raw
+                        Write-Host "[SMART] Reallocated Sectors: $($smartData.ReallocatedSectors)" -ForegroundColor Gray
+                    }
+                }
+                
+                $smartData.Attributes = $attributes
+                return $smartData
+                
+            } finally {
+                [System.Runtime.InteropServices.Marshal]::FreeHGlobal($sptdPtr)
+            }
+        } finally {
+            [System.Runtime.InteropServices.Marshal]::FreeHGlobal($smartBuffer)
+            $handle.Close()
+        }
+    } catch {
+        Write-Host "[SMART] Error: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+}
 
 # --- Writable folder cache ---
 $script:WritableFolders = @{}
@@ -311,36 +552,50 @@ function Get-DriveInventory {
         $info.relOk = $false
         $info.relErr = ""
         
-        # Method 1: Get-StorageReliabilityCounter (works for direct connections, sometimes USB)
+        # Method 1: Direct S.M.A.R.T. reading via SCSI pass-through (works for USB!)
         try {
-            $relCounter = Get-StorageReliabilityCounter -Disk $disk -ErrorAction Stop
-            if ($null -ne $relCounter) {
-                $info.wear = if ($null -ne $relCounter.Wear) { [int]$relCounter.Wear } else { $null }
-                $info.tempC = if ($null -ne $relCounter.Temperature) { [int]$relCounter.Temperature } else { $null }
-                $info.readErrors = if ($null -ne $relCounter.ReadErrorsTotal) { [long]$relCounter.ReadErrorsTotal } else { $null }
-                $info.writeErrors = if ($null -ne $relCounter.WriteErrorsTotal) { [long]$relCounter.WriteErrorsTotal } else { $null }
+            Write-Host "[INVENTORY] Attempting direct S.M.A.R.T. read via SCSI pass-through..." -ForegroundColor Cyan
+            $smartData = Get-SmartDataViaScsi $diskNum
+            if ($null -ne $smartData) {
+                if ($smartData.ContainsKey('Temperature')) {
+                    $info.tempC = $smartData.Temperature
+                    Write-Host "[INVENTORY] Temperature from S.M.A.R.T.: $($info.tempC)°C" -ForegroundColor Green
+                }
+                if ($smartData.ContainsKey('WearLevel')) {
+                    $info.wear = $smartData.WearLevel
+                    Write-Host "[INVENTORY] Wear level from S.M.A.R.T.: $($info.wear)%" -ForegroundColor Green
+                }
+                if ($smartData.ContainsKey('PowerOnHours')) {
+                    Write-Host "[INVENTORY] Power-on hours: $($smartData.PowerOnHours)" -ForegroundColor Gray
+                }
+                if ($smartData.ContainsKey('ReallocatedSectors')) {
+                    Write-Host "[INVENTORY] Reallocated sectors: $($smartData.ReallocatedSectors)" -ForegroundColor Gray
+                }
                 $info.relOk = $true
-                Write-Host "[INVENTORY] Reliability data from Get-StorageReliabilityCounter" -ForegroundColor Green
+                Write-Host "[INVENTORY] S.M.A.R.T. data retrieved via direct SCSI pass-through" -ForegroundColor Green
             }
         } catch {
-            Write-Host "[INVENTORY] Get-StorageReliabilityCounter failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "[INVENTORY] Direct S.M.A.R.T. read failed: $($_.Exception.Message)" -ForegroundColor Yellow
         }
         
-        # Method 2: WMI S.M.A.R.T. data (works for USB with SAT/UASP support)
+        # Method 2: Get-StorageReliabilityCounter (works for direct connections, sometimes USB)
         if (-not $info.relOk) {
             try {
-                $smartData = Get-CimInstance -Namespace root\wmi -ClassName MSStorageDriver_ATAPISmartData -ErrorAction Stop
-                if ($smartData) {
-                    Write-Host "[INVENTORY] Found WMI S.M.A.R.T. data" -ForegroundColor Cyan
-                    # Parse temperature from vendor-specific attributes
-                    # This is complex and device-specific, so we'll just note it's available
+                $relCounter = Get-StorageReliabilityCounter -Disk $disk -ErrorAction Stop
+                if ($null -ne $relCounter) {
+                    $info.wear = if ($null -ne $relCounter.Wear) { [int]$relCounter.Wear } else { $info.wear }
+                    $info.tempC = if ($null -ne $relCounter.Temperature) { [int]$relCounter.Temperature } else { $info.tempC }
+                    $info.readErrors = if ($null -ne $relCounter.ReadErrorsTotal) { [long]$relCounter.ReadErrorsTotal } else { $null }
+                    $info.writeErrors = if ($null -ne $relCounter.WriteErrorsTotal) { [long]$relCounter.WriteErrorsTotal } else { $null }
+                    $info.relOk = $true
+                    Write-Host "[INVENTORY] Reliability data from Get-StorageReliabilityCounter" -ForegroundColor Green
                 }
             } catch {
-                Write-Host "[INVENTORY] WMI S.M.A.R.T. query failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                Write-Host "[INVENTORY] Get-StorageReliabilityCounter failed: $($_.Exception.Message)" -ForegroundColor Yellow
             }
         }
         
-        # Method 3: Get-PhysicalDisk for additional info
+        # Method 3: Get-PhysicalDisk for health status
         if (-not $info.relOk) {
             try {
                 $physDisk = Get-PhysicalDisk -ErrorAction Stop | Where-Object { $_.DeviceId -eq $diskNum }
