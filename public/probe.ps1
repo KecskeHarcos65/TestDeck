@@ -307,26 +307,109 @@ function Get-DriveInventory {
             }
         }
 
-        # Storage Reliability Counter (may need elevation)
-        # For USB devices, this often fails because the USB enclosure doesn't pass through S.M.A.R.T. data
+        # Storage Reliability Counter - try multiple methods
+        $info.relOk = $false
+        $info.relErr = ""
+        
+        # Method 1: Try smartctl (smartmontools) if available
         try {
-            $relCounter = Get-StorageReliabilityCounter -Disk $disk -ErrorAction Stop
-            if ($null -ne $relCounter) {
-                $info.wear = if ($null -ne $relCounter.Wear) { [int]$relCounter.Wear } else { $null }
-                $info.tempC = if ($null -ne $relCounter.Temperature) { [int]$relCounter.Temperature } else { $null }
-                $info.readErrors = if ($null -ne $relCounter.ReadErrorsTotal) { [long]$relCounter.ReadErrorsTotal } else { $null }
-                $info.writeErrors = if ($null -ne $relCounter.WriteErrorsTotal) { [long]$relCounter.WriteErrorsTotal } else { $null }
-                $info.relOk = $true
-                Write-Host "[INVENTORY] Reliability data available" -ForegroundColor Green
+            $smartctlPath = $null
+            $possiblePaths = @(
+                "C:\Program Files\smartmontools\bin\smartctl.exe",
+                "C:\Program Files (x86)\smartmontools\bin\smartctl.exe",
+                "smartctl.exe"
+            )
+            foreach ($p in $possiblePaths) {
+                if (Test-Path $p) {
+                    $smartctlPath = $p
+                    break
+                }
+            }
+            
+            if ($smartctlPath) {
+                Write-Host "[INVENTORY] Found smartctl at: $smartctlPath" -ForegroundColor Cyan
+                # Get device path
+                $devicePath = "\\.\PhysicalDrive$diskNum"
+                
+                # Try to get S.M.A.R.T. data
+                $smartOutput = & $smartctlPath -A $devicePath 2>&1
+                $smartExitCode = $LASTEXITCODE
+                
+                if ($smartExitCode -eq 0 -or $smartExitCode -eq 4) {
+                    # Parse temperature
+                    $tempMatch = $smartOutput | Select-String -Pattern "Temperature:\s+(\d+)" -AllMatches
+                    if ($tempMatch) {
+                        $info.tempC = [int]$tempMatch.Matches[0].Groups[1].Value
+                        Write-Host "[INVENTORY] Temperature from smartctl: $($info.tempC)°C" -ForegroundColor Green
+                    }
+                    
+                    # Parse SSD life left / wear level
+                    $wearMatch = $smartOutput | Select-String -Pattern "(?:SSD Life Left|Media Wearout Indicator|Percent Lifetime Used):\s+(\d+)" -AllMatches
+                    if ($wearMatch) {
+                        $wearValue = [int]$wearMatch.Matches[0].Groups[1].Value
+                        # Some drives report "life left" (100 = new), others report "used" (0 = new)
+                        if ($wearValue -le 100) {
+                            $info.wear = 100 - $wearValue
+                            Write-Host "[INVENTORY] Wear from smartctl: $($info.wear)%" -ForegroundColor Green
+                        }
+                    }
+                    
+                    # Parse power-on hours
+                    $pohMatch = $smartOutput | Select-String -Pattern "Power_On_Hours.*?(\d+)" -AllMatches
+                    if ($pohMatch) {
+                        Write-Host "[INVENTORY] Power-on hours: $($pohMatch.Matches[0].Groups[1].Value)" -ForegroundColor Gray
+                    }
+                    
+                    $info.relOk = $true
+                    Write-Host "[INVENTORY] S.M.A.R.T. data retrieved via smartctl" -ForegroundColor Green
+                } else {
+                    Write-Host "[INVENTORY] smartctl failed with exit code: $smartExitCode" -ForegroundColor Yellow
+                }
             }
         } catch {
-            $info.relOk = $false
+            Write-Host "[INVENTORY] smartctl method failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        
+        # Method 2: Try Get-StorageReliabilityCounter (works for direct connections)
+        if (-not $info.relOk) {
+            try {
+                $relCounter = Get-StorageReliabilityCounter -Disk $disk -ErrorAction Stop
+                if ($null -ne $relCounter) {
+                    $info.wear = if ($null -ne $relCounter.Wear) { [int]$relCounter.Wear } else { $info.wear }
+                    $info.tempC = if ($null -ne $relCounter.Temperature) { [int]$relCounter.Temperature } else { $info.tempC }
+                    $info.readErrors = if ($null -ne $relCounter.ReadErrorsTotal) { [long]$relCounter.ReadErrorsTotal } else { $null }
+                    $info.writeErrors = if ($null -ne $relCounter.WriteErrorsTotal) { [long]$relCounter.WriteErrorsTotal } else { $null }
+                    $info.relOk = $true
+                    Write-Host "[INVENTORY] Reliability data from Get-StorageReliabilityCounter" -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "[INVENTORY] Get-StorageReliabilityCounter failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        
+        # Method 3: Try WMI for additional S.M.A.R.T. data
+        if (-not $info.relOk) {
+            try {
+                # Try to get temperature from MSStorageDriver_ATAPISmartData
+                $smartData = Get-CimInstance -Namespace root\wmi -ClassName MSStorageDriver_ATAPISmartData -ErrorAction SilentlyContinue
+                if ($smartData) {
+                    Write-Host "[INVENTORY] Found WMI S.M.A.R.T. data" -ForegroundColor Cyan
+                    # Parse temperature from vendor-specific attributes
+                    # This is complex and device-specific, so we'll just note it's available
+                }
+            } catch {
+                Write-Host "[INVENTORY] WMI S.M.A.R.T. query failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        
+        # Set error message if still no data
+        if (-not $info.relOk) {
             if ($info.bus -eq "USB") {
-                $info.relErr = "USB enclosure: S.M.A.R.T. data not accessible (requires direct SATA/NVMe connection or UASP-supporting enclosure)"
-                Write-Host "[INVENTORY] USB device: S.M.A.R.T. data not accessible through USB enclosure" -ForegroundColor Yellow
+                $info.relErr = "USB: Install smartmontools for S.M.A.R.T. data, or use direct SATA/NVMe connection"
+                Write-Host "[INVENTORY] USB device: S.M.A.R.T. data not accessible. Install smartmontools: https://www.smartmontools.org/" -ForegroundColor Yellow
             } else {
-                $info.relErr = "Requires elevation: $($_.Exception.Message)"
-                Write-Host "[INVENTORY] Reliability counter failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                $info.relErr = "Requires admin privileges or smartmontools installation"
+                Write-Host "[INVENTORY] S.M.A.R.T. data not accessible. Try running as admin or install smartmontools" -ForegroundColor Yellow
             }
         }
 
